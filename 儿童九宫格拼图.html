@@ -1,0 +1,785 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+  <title>宝宝拼图乐</title>
+  <style>
+    :root {
+      --cell-by-width: max(64px, calc((100vmin - 40px) / 3));
+      --cell-by-height: max(64px, calc((100dvh - 250px) / 6));
+      --cell: min(var(--cell-by-width), var(--cell-by-height));
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; overflow: hidden; touch-action: none; }
+    body {
+      font-family: "Arial", sans-serif;
+      background: linear-gradient(135deg, #FFE68F, #B0E2FF);
+      display: flex;
+      justify-content: center;
+      color: #1f2a44;
+    }
+    #app {
+      width: min(100vw, 560px);
+      height: 100%;
+      padding: 2vmin;
+      display: grid;
+      grid-template-rows: auto auto auto auto;
+      gap: 1.5vmin;
+      position: relative;
+      overflow: hidden;
+    }
+    .toolbar {
+      height: 11vmin;
+      min-height: 72px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+    }
+    .toolbar .left, .toolbar .right { display: flex; }
+    .toolbar .left { justify-content: flex-start; }
+    .toolbar .right { justify-content: flex-end; }
+    .icon-btn {
+      width: 68px; height: 68px; border: none; border-radius: 50%;
+      font-size: 2.4rem; background: rgba(255,255,255,.8); box-shadow: 0 4px 8px rgba(0,0,0,.15);
+      position: relative; touch-action: none;
+    }
+    .progress-ring {
+      position: absolute; inset: -4px; border-radius: 50%;
+      background: conic-gradient(#57d86b calc(var(--p,0) * 1%), transparent 0);
+      mask: radial-gradient(circle at center, transparent 61%, black 62%);
+      opacity: 0; transition: opacity .12s;
+    }
+    .icon-btn.pressing .progress-ring { opacity: 1; }
+    #previewThumb {
+      width: 18vmin; height: 18vmin; max-width: 82px; max-height: 82px;
+      border-radius: 50%; border: 3px solid #fff; overflow: hidden;
+      box-shadow: 0 4px 8px rgba(0,0,0,.2); background: rgba(255,255,255,.7);
+      touch-action: none;
+    }
+    #previewThumb canvas { width: 100%; height: 100%; display: block; }
+
+    .board-wrap { display: flex; justify-content: center; }
+    #grid {
+      width: calc(var(--cell) * 3 + 10px);
+      display: grid; grid-template-columns: repeat(3, var(--cell)); grid-template-rows: repeat(3, var(--cell));
+      gap: 5px;
+      touch-action: none;
+    }
+    .cell {
+      border-radius: var(--radius);
+      border: 2px dashed rgba(80,80,80,.3);
+      overflow: hidden;
+      position: relative;
+      background: rgba(255,255,255,.25);
+    }
+    .ghost {
+      position: absolute; inset: 0; opacity: .25; width: 100%; height: 100%;
+    }
+    .cell.highlight { border: 4px solid #3ddc64; box-shadow: inset 0 0 18px rgba(61,220,100,.65); }
+    .cell.errorFlash { animation: flashRed .2s linear; }
+    .cell.tipBlink { animation: blinkBorder .3s ease-in-out 5; }
+    @keyframes flashRed { 0%,100%{border-color:rgba(255,90,90,.2);} 50%{border-color:#ff5555;} }
+    @keyframes blinkBorder { 0%,100%{border-color:rgba(245,190,40,.2);} 50%{border-color:#ffc928; box-shadow:0 0 0 5px rgba(255,201,40,.35) inset;} }
+
+    #pieceArea {
+      background: rgba(255,255,255,.38); border-radius: 16px; padding: 8px;
+      display: grid; grid-template-columns: repeat(3, var(--cell)); grid-template-rows: repeat(3, var(--cell));
+      gap: 5px; justify-content: center; align-content: center;
+      position: relative;
+    }
+    .slot { position: relative; border-radius: var(--radius); }
+    .piece {
+      width: var(--cell); height: var(--cell);
+      border-radius: var(--radius); border: 3px solid #fff;
+      box-shadow: 0 4px 8px rgba(0,0,0,.15);
+      position: absolute; left: 0; top: 0;
+      touch-action: none;
+      transition: transform .2s cubic-bezier(0.68,-0.55,0.265,1.55), filter .2s;
+      user-select: none;
+    }
+    .piece.dragging {
+      opacity: 1 !important;
+      transform: scale(1.1);
+      filter: drop-shadow(0 8px 12px rgba(0,0,0,.3));
+      z-index: 1000;
+      transition: none;
+    }
+    .piece.placed { pointer-events: none; }
+
+    #helperBtn {
+      min-height: 72px; border: none; border-radius: 18px; background: rgba(255,255,255,.85);
+      font-size: 2rem; box-shadow: 0 5px 10px rgba(0,0,0,.15);
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      position: relative; touch-action: none;
+    }
+    #helperBtn.pulse { animation: pulse .8s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{transform:scale(1);} 50%{transform:scale(1.05);} }
+    .badge {
+      min-width: 30px; height: 30px; padding: 0 8px; border-radius: 999px;
+      background: #ff6b6b; color: #fff; font-weight: 700; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 1rem;
+    }
+    #helperBtn.selecting::after {
+      content: "?"; position: absolute; top: 8px; right: 14px; width: 24px; height: 24px;
+      border-radius: 50%; background: #fff; color: #ff8c00; font-weight: 800;
+      display: grid; place-items: center;
+    }
+
+    #fxLayer, #starLayer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .spark {
+      position: absolute; font-size: 20px; animation: spark .6s ease-out forwards;
+    }
+    @keyframes spark { from{transform:translate(-50%,-50%) scale(.5) rotate(0deg);opacity:1;} to{transform:translate(-50%,-50%) scale(1.7) rotate(140deg);opacity:0;} }
+
+    .overlay {
+      position: fixed; inset: 0; background: rgba(20,25,35,.45); display: none; align-items: center; justify-content: center;
+      z-index: 3000;
+    }
+    .overlay.show { display: flex; }
+    .card {
+      width: min(86vw, 320px); background: #fff; border-radius: 20px; padding: 18px;
+      text-align: center; box-shadow: 0 12px 20px rgba(0,0,0,.25);
+    }
+    .card .q { font-size: 2.2rem; margin-bottom: 12px; }
+    .actions { display: flex; gap: 12px; justify-content: center; }
+    .actions button { min-width: 90px; min-height: 64px; border: none; border-radius: 14px; font-size: 2rem; background: #f3f5fa; }
+
+    #previewFull canvas {
+      width: min(92vmin, 520px); height: min(92vmin, 520px); border-radius: 18px; border: 4px solid #fff;
+      box-shadow: 0 12px 24px rgba(0,0,0,.25);
+    }
+
+    #winOverlay .card { width: min(94vw, 420px); }
+    #winEmoji { font-size: 4.5rem; animation: pop .5s ease; }
+    @keyframes pop { from{transform:scale(.2);opacity:0;} to{transform:scale(1);opacity:1;} }
+    #winActions { display: none; margin-top: 14px; }
+    #winActions.show { display: flex; }
+
+    .confetti {
+      position: absolute; left: 50%; top: 58%; border-radius: 50%; opacity: 0;
+      animation: confetti 1.2s ease-out forwards;
+    }
+    @keyframes confetti {
+      0% { transform: translate(0,0) scale(.2); opacity: 1; }
+      100% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0; }
+    }
+    .fall-star {
+      position: absolute; top: -40px; font-size: 1.5rem; animation: fall linear forwards;
+    }
+    @keyframes fall { to { transform: translateY(110vh) rotate(360deg); opacity: .8; } }
+
+    #rotateHint {
+      display: none;
+      position: fixed; inset: 0; z-index: 4000;
+      background: linear-gradient(135deg,#ffe7a8,#b8e9ff);
+      align-items: center; justify-content: center; text-align: center;
+      font-size: 1.8rem; padding: 24px;
+    }
+    @media (orientation: landscape) {
+      #rotateHint { display: flex; }
+    }
+    @media (max-height: 740px) {
+      :root {
+        --cell-by-height: max(64px, calc((100dvh - 230px) / 6));
+      }
+      .toolbar { min-height: 64px; }
+      .icon-btn { width: 64px; height: 64px; font-size: 2.2rem; }
+      #helperBtn { min-height: 64px; font-size: 1.8rem; }
+      #pieceArea { padding: 6px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="toolbar">
+      <div class="left">
+        <button id="homeBtn" class="icon-btn" aria-label="home">🏠<span class="progress-ring"></span></button>
+      </div>
+      <button id="previewThumb" aria-label="preview"></button>
+      <div class="right">
+        <button id="shuffleBtn" class="icon-btn" aria-label="shuffle">🔄<span class="progress-ring"></span></button>
+      </div>
+    </div>
+
+    <div class="board-wrap"><div id="grid"></div></div>
+    <div id="pieceArea"></div>
+    <button id="helperBtn" aria-label="helper"><span>🧸 小帮手</span><span id="helperCount" class="badge">3</span></button>
+
+    <div id="fxLayer"></div>
+    <div id="starLayer"></div>
+  </div>
+
+  <div id="confirmOverlay" class="overlay">
+    <div class="card">
+      <div class="q">🤔？</div>
+      <div class="actions">
+        <button id="confirmYes">👍</button>
+        <button id="confirmNo">👎</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="previewFull" class="overlay"></div>
+
+  <div id="winOverlay" class="overlay">
+    <div class="card">
+      <div id="winEmoji">🎉</div>
+      <div id="winActions" class="actions">
+        <button id="playAgain">🔄</button>
+        <button id="backHome">🏠</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rotateHint">请把设备竖过来再玩哦 📱</div>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const state = {
+      currentImageId: 0,
+      grid: Array(9).fill(null),
+      pieces: Array.from({length:9}, (_,i)=>i),
+      helperRemaining: 3,
+      isDragging: false,
+      dragPieceIndex: null,
+      dragPointerId: null,
+      dragEl: null,
+      dragOffsetX: 0,
+      dragOffsetY: 0,
+      dragMoved: false,
+      dragOriginRect: null,
+      lockUI: false,
+      completed: false,
+      helperSelecting: false,
+      longPressTimer: null,
+      holdActionDone: false
+    };
+
+    const gridEl = document.getElementById('grid');
+    const pieceAreaEl = document.getElementById('pieceArea');
+    const helperBtn = document.getElementById('helperBtn');
+    const helperCount = document.getElementById('helperCount');
+    const fxLayer = document.getElementById('fxLayer');
+    const starLayer = document.getElementById('starLayer');
+    const previewThumb = document.getElementById('previewThumb');
+    const previewFull = document.getElementById('previewFull');
+    const confirmOverlay = document.getElementById('confirmOverlay');
+    const winOverlay = document.getElementById('winOverlay');
+    const winActions = document.getElementById('winActions');
+
+    let confirmNext = null;
+    let selectedCell = -1;
+    let imageCanvasList = [];
+    let pieceCanvases = [];
+    let audioCtx = null;
+
+    function ensureAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    function playTone(freq, type='sine', duration=.12, volume=.15, when=0) {
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime + when;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, now);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(volume, now + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(now); o.stop(now + duration + 0.03);
+      return {o,g,now};
+    }
+
+    function playCorrectSound() { playTone(800, 'square', 0.08, .18); }
+    function playWrongSound() {
+      if (!audioCtx) return;
+      const r = playTone(400, 'sine', 0.25, .18);
+      r.o.frequency.exponentialRampToValueAtTime(200, r.now + 0.25);
+    }
+    function playPickupSound() { playTone(720, 'triangle', 0.06, .12); }
+    function playConfirmSound() { playTone(1000, 'triangle', 0.08, .15); }
+    function playLineDing() { playTone(800, 'sine', 0.1, .16, 0); playTone(1200, 'sine', 0.1, .16, 0.1); }
+
+    function playMelody() {
+      const notes = [523.25,587.33,659.25,698.46,783.99];
+      notes.forEach((f,i)=>playTone(f, 'triangle', 0.15, .12, i*0.15));
+      playTone(987.77, 'sawtooth', 0.28, .1, 0.82);
+    }
+
+    function playConfettiNoise(duration = 2.5) {
+      if (!audioCtx) return;
+      const end = performance.now() + duration*1000;
+      (function loop(){
+        if (performance.now() > end) return;
+        const t = playTone(300 + Math.random()*2200, 'square', 0.03 + Math.random()*0.05, 0.02 + Math.random()*0.05);
+        if (t) t.o.frequency.exponentialRampToValueAtTime(100 + Math.random()*400, t.now + 0.05);
+        setTimeout(loop, 70 + Math.random()*130);
+      })();
+    }
+
+    function shuffle(arr) {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    function makeCanvas(size=600) {
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      return c;
+    }
+
+    function drawFaceBase(ctx, bg, face, size=600) {
+      ctx.clearRect(0,0,size,size);
+      ctx.fillStyle = bg; ctx.fillRect(0,0,size,size);
+      ctx.fillStyle = face; ctx.beginPath(); ctx.arc(size/2,size/2,size*0.38,0,Math.PI*2); ctx.fill();
+    }
+    const eye = (ctx,x,y,r)=>{ ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(x+r*.2,y+r*.2,r*.45,0,Math.PI*2); ctx.fill(); };
+
+    function drawCat(ctx,s=600){
+      drawFaceBase(ctx,'#ffe3a5','#ffb366',s);
+      ctx.fillStyle='#ffb366';
+      ctx.beginPath(); ctx.moveTo(s*.25,s*.24); ctx.lineTo(s*.38,s*.06); ctx.lineTo(s*.44,s*.26); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s*.75,s*.24); ctx.lineTo(s*.62,s*.06); ctx.lineTo(s*.56,s*.26); ctx.fill();
+      eye(ctx,s*.39,s*.46,s*.07); eye(ctx,s*.61,s*.46,s*.07);
+      ctx.fillStyle='#ff7a7a'; ctx.beginPath(); ctx.moveTo(s*.5,s*.53); ctx.lineTo(s*.47,s*.58); ctx.lineTo(s*.53,s*.58); ctx.fill();
+      ctx.strokeStyle='#7a4a2a'; ctx.lineWidth=4;
+      [[.35,.58,.2,.56],[.35,.6,.2,.62],[.65,.58,.8,.56],[.65,.6,.8,.62]].forEach(w=>{ctx.beginPath();ctx.moveTo(s*w[0],s*w[1]);ctx.lineTo(s*w[2],s*w[3]);ctx.stroke();});
+    }
+    function drawDog(ctx,s=600){
+      drawFaceBase(ctx,'#dff5ff','#c48b5a',s);
+      ctx.fillStyle='#9a6740';
+      ctx.beginPath(); ctx.ellipse(s*.26,s*.32,s*.1,s*.18,.4,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s*.74,s*.32,s*.1,s*.18,-.4,0,Math.PI*2); ctx.fill();
+      eye(ctx,s*.41,s*.46,s*.065); eye(ctx,s*.59,s*.46,s*.065);
+      ctx.fillStyle='#2d2d2d'; ctx.beginPath(); ctx.ellipse(s*.5,s*.58,s*.06,s*.045,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#ff8aa0'; ctx.beginPath(); ctx.ellipse(s*.5,s*.66,s*.05,s*.07,0,0,Math.PI*2); ctx.fill();
+    }
+    function drawRabbit(ctx,s=600){
+      drawFaceBase(ctx,'#ffeaf5','#ffffff',s);
+      ctx.fillStyle='#fff'; ctx.fillRect(s*.33,s*.02,s*.11,s*.22); ctx.fillRect(s*.56,s*.02,s*.11,s*.22);
+      ctx.fillStyle='#ffb6d1'; ctx.fillRect(s*.36,s*.04,s*.05,s*.17); ctx.fillRect(s*.59,s*.04,s*.05,s*.17);
+      eye(ctx,s*.4,s*.46,s*.06); eye(ctx,s*.6,s*.46,s*.06);
+      ctx.fillStyle='#ff91b1'; ctx.beginPath(); ctx.ellipse(s*.5,s*.58,s*.04,s*.03,0,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#d98aa4'; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(s*.5,s*.6); ctx.quadraticCurveTo(s*.46,s*.64,s*.43,s*.66); ctx.moveTo(s*.5,s*.6); ctx.quadraticCurveTo(s*.54,s*.64,s*.57,s*.66); ctx.stroke();
+    }
+    function drawBear(ctx,s=600){
+      drawFaceBase(ctx,'#fff2cf','#8d5e3c',s);
+      ctx.fillStyle='#8d5e3c'; ctx.beginPath(); ctx.arc(s*.28,s*.26,s*.1,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(s*.72,s*.26,s*.1,0,Math.PI*2); ctx.fill();
+      eye(ctx,s*.4,s*.46,s*.06); eye(ctx,s*.6,s*.46,s*.06);
+      ctx.fillStyle='#b9845f'; ctx.beginPath(); ctx.ellipse(s*.5,s*.62,s*.13,s*.1,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#2c2c2c'; ctx.beginPath(); ctx.ellipse(s*.5,s*.6,s*.045,s*.032,0,0,Math.PI*2); ctx.fill();
+    }
+    function drawPanda(ctx,s=600){
+      drawFaceBase(ctx,'#e5f2ff','#fff',s);
+      ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(s*.28,s*.24,s*.1,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(s*.72,s*.24,s*.1,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s*.4,s*.46,s*.08,s*.11,.3,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(s*.6,s*.46,s*.08,s*.11,-.3,0,Math.PI*2); ctx.fill();
+      eye(ctx,s*.4,s*.46,s*.04); eye(ctx,s*.6,s*.46,s*.04);
+      ctx.fillStyle='#222'; ctx.beginPath(); ctx.ellipse(s*.5,s*.6,s*.045,s*.032,0,0,Math.PI*2); ctx.fill();
+    }
+    function drawPig(ctx,s=600){
+      drawFaceBase(ctx,'#e8fbda','#ff9fc7',s);
+      ctx.fillStyle='#ff9fc7'; ctx.beginPath(); ctx.ellipse(s*.28,s*.22,s*.09,s*.13,-.4,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(s*.72,s*.22,s*.09,s*.13,.4,0,Math.PI*2); ctx.fill();
+      eye(ctx,s*.41,s*.46,s*.06); eye(ctx,s*.59,s*.46,s*.06);
+      ctx.fillStyle='#ff7db0'; ctx.beginPath(); ctx.ellipse(s*.5,s*.6,s*.13,s*.09,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#d94c86'; ctx.beginPath(); ctx.ellipse(s*.46,s*.6,s*.02,s*.03,0,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(s*.54,s*.6,s*.02,s*.03,0,0,Math.PI*2); ctx.fill();
+    }
+
+    function generateImages() {
+      const drawers = [drawCat,drawDog,drawRabbit,drawBear,drawPanda,drawPig];
+      imageCanvasList = drawers.map(fn => {
+        const c = makeCanvas(600); fn(c.getContext('2d'), 600); return c;
+      });
+    }
+
+    function cutPiecesFrom(canvas) {
+      const out = [];
+      for (let i = 0; i < 9; i++) {
+        const c = makeCanvas(200); const cx = c.getContext('2d');
+        const sx = (i % 3) * 200, sy = Math.floor(i/3) * 200;
+        cx.drawImage(canvas, sx, sy, 200, 200, 0, 0, 200, 200);
+        out.push(c);
+      }
+      return out;
+    }
+
+    function renderPreviewThumb() {
+      previewThumb.innerHTML = '';
+      const c = document.createElement('canvas'); c.width = 160; c.height = 160;
+      c.getContext('2d').drawImage(imageCanvasList[state.currentImageId], 0, 0, 160, 160);
+      previewThumb.appendChild(c);
+    }
+
+    function renderGrid() {
+      gridEl.innerHTML = '';
+      for (let i = 0; i < 9; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.index = i;
+        const ghost = document.createElement('canvas');
+        ghost.className = 'ghost'; ghost.width = 200; ghost.height = 200;
+        ghost.getContext('2d').drawImage(pieceCanvases[i], 0, 0, 200, 200);
+        cell.appendChild(ghost);
+
+        const p = state.grid[i];
+        if (p !== null) {
+          const pc = document.createElement('canvas');
+          pc.className = 'piece placed'; pc.width = 200; pc.height = 200;
+          pc.style.left = '0'; pc.style.top = '0'; pc.dataset.piece = p;
+          pc.getContext('2d').drawImage(pieceCanvases[p], 0, 0, 200, 200);
+          cell.appendChild(pc);
+        }
+        gridEl.appendChild(cell);
+      }
+    }
+
+    function renderPieces() {
+      pieceAreaEl.innerHTML = '';
+      for (let i = 0; i < 9; i++) {
+        const slot = document.createElement('div'); slot.className = 'slot'; slot.dataset.slot = i;
+        const p = state.pieces[i];
+        if (!state.grid.includes(p)) {
+          const c = document.createElement('canvas');
+          c.className = 'piece'; c.width = 200; c.height = 200; c.dataset.piece = p; c.dataset.slot = i;
+          c.getContext('2d').drawImage(pieceCanvases[p], 0, 0, 200, 200);
+          slot.appendChild(c);
+        }
+        pieceAreaEl.appendChild(slot);
+      }
+    }
+
+    function updateHelperButton() {
+      helperCount.textContent = String(state.helperRemaining);
+      helperBtn.disabled = state.helperRemaining <= 0 || state.completed;
+    }
+
+    function initGame(randomImage = true) {
+      state.grid = Array(9).fill(null);
+      state.pieces = shuffle([0,1,2,3,4,5,6,7,8]);
+      state.helperRemaining = 3;
+      state.completed = false;
+      state.lockUI = false;
+      state.helperSelecting = false;
+      if (randomImage) state.currentImageId = (Math.random() * imageCanvasList.length) | 0;
+      pieceCanvases = cutPiecesFrom(imageCanvasList[state.currentImageId]);
+      renderPreviewThumb();
+      renderGrid();
+      renderPieces();
+      updateHelperButton();
+      winOverlay.classList.remove('show');
+      winActions.classList.remove('show');
+      fxLayer.innerHTML = ''; starLayer.innerHTML = '';
+    }
+
+    function getTargetCellByPoint(x, y) {
+      const rect = gridEl.getBoundingClientRect();
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return -1;
+      const size = rect.width / 3;
+      const col = Math.floor((x - rect.left) / size);
+      const row = Math.floor((y - rect.top) / size);
+      const idx = row * 3 + col;
+      return idx >= 0 && idx < 9 ? idx : -1;
+    }
+
+    function highlightCell(idx) {
+      if (selectedCell === idx) return;
+      [...gridEl.children].forEach(c=>c.classList.remove('highlight'));
+      selectedCell = idx;
+      if (idx >= 0 && state.grid[idx] === null) gridEl.children[idx].classList.add('highlight');
+    }
+
+    function clearHighlight() {
+      [...gridEl.children].forEach(c=>c.classList.remove('highlight'));
+      selectedCell = -1;
+    }
+
+    function createSparkAtCell(cellIndex) {
+      const cell = gridEl.children[cellIndex];
+      const r = cell.getBoundingClientRect();
+      const x = r.left + r.width/2, y = r.top + r.height/2;
+      for (let i=0;i<5;i++) {
+        const s = document.createElement('div');
+        s.className = 'spark'; s.textContent = '⭐';
+        s.style.left = `${x}px`; s.style.top = `${y}px`;
+        s.style.transform = `translate(-50%,-50%) rotate(${i*72}deg)`;
+        s.style.animationDelay = `${i*0.03}s`;
+        fxLayer.appendChild(s);
+        setTimeout(()=>s.remove(),700);
+      }
+    }
+
+    function checkLineDone(index) {
+      const row = Math.floor(index/3);
+      const col = index%3;
+      const rowDone = [0,1,2].every(c => state.grid[row*3+c] !== null);
+      const colDone = [0,1,2].every(r => state.grid[r*3+col] !== null);
+      if (rowDone || colDone) playLineDing();
+    }
+
+    function checkCompleted() {
+      if (state.grid.every(v => v !== null)) startCelebration();
+    }
+
+    function placePieceSuccess(pieceIndex, targetIndex, movingEl, fromRect) {
+      state.grid[targetIndex] = pieceIndex;
+      playCorrectSound();
+      if (navigator.vibrate) navigator.vibrate(20);
+      const cellRect = gridEl.children[targetIndex].getBoundingClientRect();
+      const clone = document.createElement('canvas');
+      clone.className = 'piece'; clone.width = 200; clone.height = 200;
+      clone.style.position = 'fixed'; clone.style.left = `${fromRect.left}px`; clone.style.top = `${fromRect.top}px`;
+      clone.style.width = `${fromRect.width}px`; clone.style.height = `${fromRect.height}px`;
+      clone.getContext('2d').drawImage(pieceCanvases[pieceIndex],0,0,200,200);
+      document.body.appendChild(clone);
+      state.lockUI = true;
+      clone.animate([
+        { transform: 'translate(0,0) scale(1.05)' },
+        { transform: `translate(${cellRect.left - fromRect.left}px, ${cellRect.top - fromRect.top}px) scale(1)` }
+      ], { duration: 220, easing: 'cubic-bezier(0.68,-0.55,0.265,1.55)' }).onfinish = () => {
+        clone.remove();
+        state.lockUI = false;
+        renderGrid(); renderPieces();
+        createSparkAtCell(targetIndex);
+        checkLineDone(targetIndex);
+        checkCompleted();
+      };
+      if (movingEl) movingEl.remove();
+    }
+
+    function wrongReturnAnimation(el, targetIndex) {
+      playWrongSound();
+      state.lockUI = true;
+      if (targetIndex >= 0) {
+        const c = gridEl.children[targetIndex];
+        c.classList.add('errorFlash');
+        setTimeout(()=>c.classList.remove('errorFlash'),220);
+      }
+      const from = el.getBoundingClientRect();
+      const to = state.dragOriginRect;
+      el.animate([
+        { transform: 'translate(0,0) scale(1.1)' },
+        { transform: `translate(${to.left - from.left}px, ${to.top - from.top}px) scale(1)` }
+      ], { duration: 400, easing: 'ease-in-out' }).onfinish = () => {
+        el.remove();
+        state.lockUI = false;
+        renderPieces();
+      };
+    }
+
+    function onPiecePointerDown(e) {
+      const el = e.target.closest('.piece');
+      if (!el || state.lockUI || state.completed) return;
+      const pieceIndex = Number(el.dataset.piece);
+      if (state.grid.includes(pieceIndex)) return;
+      ensureAudio();
+      playPickupSound();
+      state.isDragging = true;
+      state.dragMoved = false;
+      state.dragPieceIndex = pieceIndex;
+      state.dragPointerId = e.pointerId;
+      state.dragEl = el;
+      state.dragOriginRect = el.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      state.dragOffsetX = e.clientX - r.left;
+      state.dragOffsetY = e.clientY - r.top;
+      el.classList.add('dragging');
+      el.style.position = 'fixed'; el.style.left = `${r.left}px`; el.style.top = `${r.top}px`; el.style.margin = '0';
+      document.body.appendChild(el);
+      el.setPointerCapture(e.pointerId);
+    }
+
+    function onPiecePointerMove(e) {
+      if (!state.isDragging || state.dragPointerId !== e.pointerId || !state.dragEl) return;
+      const nx = e.clientX - state.dragOffsetX;
+      const ny = e.clientY - state.dragOffsetY;
+      if (Math.abs(nx - state.dragOriginRect.left) + Math.abs(ny - state.dragOriginRect.top) > 8) state.dragMoved = true;
+      state.dragEl.style.left = `${nx}px`; state.dragEl.style.top = `${ny}px`;
+      const cx = nx + state.dragEl.getBoundingClientRect().width / 2;
+      const cy = ny + state.dragEl.getBoundingClientRect().height / 2;
+      highlightCell(getTargetCellByPoint(cx, cy));
+    }
+
+    function blinkTip(pieceIndex) {
+      const cell = gridEl.children[pieceIndex];
+      if (!cell || state.grid[pieceIndex] !== null) return;
+      cell.classList.add('tipBlink');
+      setTimeout(()=>cell.classList.remove('tipBlink'),1500);
+    }
+
+    function onPiecePointerUp(e) {
+      if (!state.isDragging || state.dragPointerId !== e.pointerId || !state.dragEl) return;
+      const pieceIndex = state.dragPieceIndex;
+      const el = state.dragEl;
+      el.releasePointerCapture?.(e.pointerId);
+      const rect = el.getBoundingClientRect();
+      const targetIndex = getTargetCellByPoint(rect.left + rect.width/2, rect.top + rect.height/2);
+
+      if (!state.dragMoved) {
+        if (state.helperSelecting) {
+          if (state.grid[pieceIndex] === null && state.helperRemaining > 0) {
+            state.helperRemaining--; updateHelperButton();
+            state.helperSelecting = false; helperBtn.classList.remove('selecting','pulse');
+            placePieceSuccess(pieceIndex, pieceIndex, el, rect);
+          }
+        } else {
+          blinkTip(pieceIndex);
+          el.remove();
+          renderPieces();
+        }
+      } else if (targetIndex >= 0 && state.grid[targetIndex] === null && pieceIndex === targetIndex) {
+        placePieceSuccess(pieceIndex, targetIndex, el, rect);
+      } else {
+        wrongReturnAnimation(el, targetIndex);
+      }
+
+      clearHighlight();
+      state.isDragging = false;
+      state.dragPieceIndex = null;
+      state.dragPointerId = null;
+      state.dragEl = null;
+    }
+
+    function attachPieceEvents() {
+      pieceAreaEl.addEventListener('pointerdown', onPiecePointerDown);
+      window.addEventListener('pointermove', onPiecePointerMove, { passive: false });
+      window.addEventListener('pointerup', onPiecePointerUp);
+      window.addEventListener('pointercancel', onPiecePointerUp);
+    }
+
+    function showConfirm(action) {
+      confirmNext = action;
+      confirmOverlay.classList.add('show');
+    }
+
+    document.getElementById('confirmYes').addEventListener('click', () => {
+      confirmOverlay.classList.remove('show');
+      ensureAudio(); playConfirmSound();
+      confirmNext && confirmNext();
+      confirmNext = null;
+    });
+    document.getElementById('confirmNo').addEventListener('click', () => {
+      confirmOverlay.classList.remove('show');
+      confirmNext = null;
+    });
+
+    function setupLongPress(btn, action) {
+      const ring = btn.querySelector('.progress-ring');
+      let start = 0;
+      function clear() {
+        clearTimeout(state.longPressTimer);
+        btn.classList.remove('pressing');
+        ring.style.setProperty('--p', 0);
+      }
+      btn.addEventListener('pointerdown', () => {
+        if (state.completed) return;
+        ensureAudio();
+        state.holdActionDone = false;
+        btn.classList.add('pressing');
+        start = performance.now();
+        const raf = () => {
+          if (!btn.classList.contains('pressing') || state.holdActionDone) return;
+          const p = Math.min(100, ((performance.now() - start) / 1000) * 100);
+          ring.style.setProperty('--p', p);
+          requestAnimationFrame(raf);
+        };
+        requestAnimationFrame(raf);
+        state.longPressTimer = setTimeout(() => {
+          state.holdActionDone = true;
+          clear();
+          playConfirmSound();
+          action();
+        }, 1000);
+      });
+      ['pointerup','pointercancel','pointerleave'].forEach(ev => btn.addEventListener(ev, () => {
+        if (!state.holdActionDone) showConfirm(action);
+        clear();
+      }));
+    }
+
+    function openPreview() {
+      previewFull.innerHTML = '';
+      const c = document.createElement('canvas'); c.width = 600; c.height = 600;
+      c.getContext('2d').drawImage(imageCanvasList[state.currentImageId],0,0,600,600);
+      previewFull.appendChild(c);
+      previewFull.classList.add('show');
+    }
+
+    function startCelebration() {
+      state.completed = true;
+      winOverlay.classList.add('show');
+      playMelody();
+      playConfettiNoise(3);
+      try {
+        const utter = new SpeechSynthesisUtterance('你真棒');
+        utter.lang = 'zh-CN'; utter.rate = 0.95;
+        speechSynthesis.speak(utter);
+      } catch (_) {}
+
+      for (let i=0;i<50;i++) {
+        const d = document.createElement('div');
+        d.className = 'confetti';
+        const size = 6 + Math.random()*12;
+        d.style.width = `${size}px`; d.style.height = `${size}px`;
+        d.style.background = `hsl(${Math.random()*360},90%,60%)`;
+        d.style.setProperty('--dx', `${(Math.random()-0.5)*80}vmin`);
+        d.style.setProperty('--dy', `${-20 - Math.random()*70}vmin`);
+        d.style.animationDelay = `${Math.random()*0.2}s`;
+        fxLayer.appendChild(d);
+        setTimeout(()=>d.remove(),1300);
+      }
+
+      const starTimer = setInterval(() => {
+        const s = document.createElement('div');
+        s.className = 'fall-star'; s.textContent = ['⭐','✨','🌟'][Math.floor(Math.random()*3)];
+        s.style.left = `${Math.random()*100}vw`;
+        s.style.animationDuration = `${2 + Math.random()*2.5}s`;
+        starLayer.appendChild(s);
+        setTimeout(()=>s.remove(),4800);
+      }, 120);
+
+      setTimeout(() => { clearInterval(starTimer); }, 5000);
+      setTimeout(() => { winActions.classList.add('show'); }, 3000);
+    }
+
+    helperBtn.addEventListener('click', () => {
+      if (state.completed || state.helperRemaining <= 0) return;
+      ensureAudio();
+      state.helperSelecting = !state.helperSelecting;
+      helperBtn.classList.toggle('selecting', state.helperSelecting);
+      helperBtn.classList.toggle('pulse', state.helperSelecting);
+    });
+
+    document.body.addEventListener('pointerdown', (e) => {
+      if (!state.helperSelecting) return;
+      if (!e.target.closest('.piece') && !e.target.closest('#helperBtn')) {
+        state.helperSelecting = false;
+        helperBtn.classList.remove('selecting','pulse');
+      }
+    });
+
+    previewThumb.addEventListener('click', openPreview);
+    previewFull.addEventListener('click', () => previewFull.classList.remove('show'));
+    setupLongPress(document.getElementById('homeBtn'), () => initGame(true));
+    setupLongPress(document.getElementById('shuffleBtn'), () => {
+      state.currentImageId = (state.currentImageId + 1) % imageCanvasList.length;
+      initGame(false);
+    });
+
+    document.getElementById('playAgain').addEventListener('click', () => initGame(false));
+    document.getElementById('backHome').addEventListener('click', () => initGame(true));
+
+    attachPieceEvents();
+    generateImages();
+    initGame(true);
+  });
+  </script>
+</body>
+</html>
